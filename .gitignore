@@ -1,0 +1,41 @@
+# ---------- Visual Studio / MSBuild ----------
+.vs/
+[Bb]in/
+[Dd]ebug/
+[Rr]elease/
+x64/
+x86/
+*.obj
+*.o
+*.exe
+*.pdb
+*.idb
+*.ilk
+*.exp
+*.lib
+*.tlog
+*.lastbuildstate
+*.log
+*.aps
+*.user
+*.suo
+*.opendb
+*.cache
+*.VC.db
+*.VC.VC.opendb
+
+# ---------- CMake ----------
+build/
+CMakeCache.txt
+CMakeFiles/
+
+# ---------- MinGW / GCC ----------
+*.d
+*.dSYM/
+a.out
+
+# ---------- IDE / OS ----------
+.vscode/
+.idea/
+Thumbs.db
+Desktop.ini
