@@ -140,7 +140,7 @@ void  ConcurrentFree(void* ptr);      // 释放内存
 ### Visual Studio 2022（推荐）
 
 1. 用 VS 2022 打开 `tcmalloc1.sln`（工具集 `v143`）。
-2. 选 `Debug|x64` 或 `Release|x64`，直接 F5 运行，默认执行 `src/Benchmark.cpp` 里的 `main`，它会跑两组性能对比。
+2. **平台选 `x86`**（`Debug|x86` / `Release|x86`），直接 F5 运行，默认执行 `src/Benchmark.cpp` 里的 `main`，它会跑两组性能对比。为什么不能用 x64 见下方「已知限制」。
 3. 想看功能测试：把 `src/Benchmark.cpp` 的 `main` 注释掉，取消 `src/UnitTest.cpp` 末尾 `main` 的注释（`UnitTest.cpp:139`）。
 
 ### 非 MSVC 编译器（MinGW / g++，可选）
@@ -154,7 +154,6 @@ g++ -std=c++17 -O2 -fpermissive -w src/Benchmark.cpp src/ThreadCache.cpp \
 
 - `src/ThreadCache.h`：`_declspec(thread)` → `thread_local`（`_declspec` 是 MSVC 拼写，GCC/Clang 下会被忽略，导致多线程共享同一个缓存而崩溃）。
 - `src/ThreadCache.cpp`：`min(...)` → `std::min(...)`（MSVC 下 `min` 来自 `windows.h` 的宏）。
-- `src/Benchmark.cpp`：`printf` 里直接传 `std::atomic<size_t>` 需要写成 `malloc_costtime.load()`。
 
 另外 `SystemAlloc` / `SystemFree` 基于 `VirtualAlloc` / `VirtualFree` 实现，换到 Linux 需要替换为 `brk` / `mmap`。
 
@@ -182,6 +181,7 @@ g++ -std=c++17 -O2 -fpermissive -w src/Benchmark.cpp src/ThreadCache.cpp \
 
 ## 已知限制
 
+- **x64 配置编译能过、但运行会崩**：现代 Windows 的 `VirtualAlloc` 会返回 4GB 以上的地址（本机实测在 3TB 量级，页号约 3.8 亿），而页号到 span 的映射表 `TCMalloc_PageMap1<32 - PAGE_SHIFT>` 只覆盖 2^19 = 524288 个页（即 4GB 地址空间），且 `set()` 没有边界检查，于是越界写内存直接崩溃（`0xC0000005`）。解决办法二选一：使用 `x86` 平台（32 位进程地址空间本来就小于 4GB），或把映射表换成三级基数树 `TCMalloc_PageMap3` / `std::unordered_map`。
 - 仅支持 Windows：`SystemAlloc/SystemFree` 依赖 `VirtualAlloc/VirtualFree`。
 - 暂未实现 tcmalloc 的后台回收线程（scavenger），空闲页不会被主动归还系统。
 - 未提供 `aligned_alloc`、`realloc` 等接口，仅支持固定大小的小对象与整页大对象。

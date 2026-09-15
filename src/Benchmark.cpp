@@ -44,13 +44,13 @@ void BenchmarkMalloc(size_t ntimes, size_t nworks, size_t rounds)
     }
 
     printf("%u个线程并发执行%u轮次，每轮次malloc %u次: 花费：%u ms\n",
-           nworks, rounds, ntimes, malloc_costtime);
+           nworks, rounds, ntimes, malloc_costtime.load());
 
     printf("%u个线程并发执行%u轮次，每轮次free %u次: 花费：%u ms\n",
-           nworks, rounds, ntimes, free_costtime);
+           nworks, rounds, ntimes, free_costtime.load());
 
     printf("%u个线程并发malloc&free %u次，总计花费：%u ms\n",
-           nworks, nworks * rounds * ntimes, malloc_costtime + free_costtime);
+           nworks, nworks * rounds * ntimes, malloc_costtime.load() + free_costtime.load());
 }
 
 // 单轮次申请释放次数 线程数 轮次
@@ -96,13 +96,13 @@ void BenchmarkConcurrentMalloc(size_t ntimes, size_t nworks, size_t rounds)
     }
 
     printf("%u个线程并发执行%u轮次，每轮次concurrent alloc %u次: 花费：%u ms\n",
-           nworks, rounds, ntimes, malloc_costtime);
+           nworks, rounds, ntimes, malloc_costtime.load());
 
     printf("%u个线程并发执行%u轮次，每轮次concurrent dealloc %u次: 花费：%u ms\n",
-           nworks, rounds, ntimes, free_costtime);
+           nworks, rounds, ntimes, free_costtime.load());
 
     printf("%u个线程并发concurrent alloc&dealloc %u次，总计花费：%u ms\n",
-           nworks, nworks * rounds * ntimes, malloc_costtime + free_costtime);
+           nworks, nworks * rounds * ntimes, malloc_costtime.load() + free_costtime.load());
 }
 
 int main()
