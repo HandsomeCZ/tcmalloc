@@ -35,6 +35,15 @@ typedef size_t PAGE_ID;
 // linux
 #endif
 
+// 页号映射表需要多少位：要能覆盖整个进程地址空间
+// x64 用户地址空间 47 位 -> 页号 34 位；Win32 地址空间 32 位 -> 页号 19 位
+// 注意这个值必须小于等于 sizeof(PAGE_ID) * 8，否则右移位数超过类型宽度是未定义行为
+#ifdef _WIN64
+static const size_t PAGE_MAP_BITS = 47 - PAGE_SHIFT;
+#else
+static const size_t PAGE_MAP_BITS = 32 - PAGE_SHIFT;
+#endif
+
 // 直接去堆上按页申请空间
 inline static void *SystemAlloc(size_t kpage)
 {
@@ -57,6 +66,14 @@ inline static void SystemFree(void *ptr)
 #else
     // sbrk unmmap等
 #endif
+}
+
+// 按字节向系统申请内存，内部向上取整到整页
+// （PageMap3 的中间节点和叶子节点是按字节计算的，所以要这个封装）
+inline static void *SystemAllocBytes(size_t bytes)
+{
+    size_t kpage = (bytes + (1 << PAGE_SHIFT) - 1) >> PAGE_SHIFT;
+    return SystemAlloc(kpage);
 }
 
 static void *&NextObj(void *obj)

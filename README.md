@@ -24,7 +24,7 @@ void  ConcurrentFree(void* ptr);      // 释放内存
     ├── ThreadCache.h/.cpp       # 线程缓存：每个线程一份，208 个自由链表桶，无锁
     ├── CentralCache.h/.cpp      # 中心缓存：全局单例，208 个 span 桶，每桶一把锁
     ├── PageCache.h/.cpp         # 页缓存：全局单例，1~128 页的 span 桶，负责向系统申请与页合并
-    ├── PageMap.h                # 页号 → span 的映射表（单层数组 / 二级、三级基数树实现）
+    ├── PageMap.h                # 页号 → span 的映射表（单层数组 / 二级、三级基数树三种实现）
     ├── ObjectPool.h             # 定长内存池，为 ThreadCache / Span 等控制结构本身提供内存
     ├── UnitTest.cpp             # 功能测试场景（main 默认被注释）
     └── Benchmark.cpp            # 与 malloc/free 的性能对比（工程默认入口）
@@ -77,7 +77,7 @@ void  ConcurrentFree(void* ptr);      // 释放内存
 - **Span**：管理一段连续页的内存块，记录 `_pageId`（起始页号）、`_n`（页数）、`_objSize`（切出来的小对象大小）、`_useCount`（已分配给线程缓存的对象数）、`_freeList`（未分配出去的对象链表）、`_isUse`（是否正在被使用）。
 - **SpanList**：带哨兵的双向循环链表，每桶自带一把 `std::mutex`。
 - **ObjectPool**：定长内存池，避免用 `new` 反复申请 `ThreadCache`、`Span` 这类控制结构（128KB 一批，切分 + 回收复用）。
-- **PageMap**：页号到 `Span*` 的映射。文件里给了单层数组、二级基数树、三级基数树三种实现，本工程实际用单层数组 `TCMalloc_PageMap1<32 - PAGE_SHIFT>`。
+- **PageMap**：页号到 `Span*` 的映射。文件里给了三种实现——单层数组 `TCMalloc_PageMap1`、二级基数树 `TCMalloc_PageMap2`、三级基数树 `TCMalloc_PageMap3`，本工程用的是**三级基数树**：中间节点和叶子都按需分配（所以 `set()` 会先 `Ensure()` 建好路径上的节点），`PAGE_MAP_BITS` 覆盖整个进程地址空间。
 
 ### 关键参数
 
@@ -88,6 +88,7 @@ void  ConcurrentFree(void* ptr);      // 释放内存
 | `NPAGES` | 129 | 页缓存桶数（下标 1~128） |
 | `PAGE_SHIFT` | 13 | 一页 8 KB |
 | `PAGE_ID` | x64 下为 `unsigned long long` | 页号 |
+| `PAGE_MAP_BITS` | x64 下 `47 - PAGE_SHIFT` = 34，Win32 下 `32 - PAGE_SHIFT` = 19 | 页号映射表需要覆盖的位数 |
 
 ## 关键流程
 
@@ -140,7 +141,7 @@ void  ConcurrentFree(void* ptr);      // 释放内存
 ### Visual Studio 2022（推荐）
 
 1. 用 VS 2022 打开 `tcmalloc1.sln`（工具集 `v143`）。
-2. **平台选 `x86`**（`Debug|x86` / `Release|x86`），直接 F5 运行，默认执行 `src/Benchmark.cpp` 里的 `main`，它会跑两组性能对比。为什么不能用 x64 见下方「已知限制」。
+2. 平台选 `x64` 或 `x86` 都能跑，直接 F5 运行，默认执行 `src/Benchmark.cpp` 里的 `main`，它会跑两组性能对比。
 3. 想看功能测试：把 `src/Benchmark.cpp` 的 `main` 注释掉，取消 `src/UnitTest.cpp` 末尾 `main` 的注释（`UnitTest.cpp:139`）。
 
 ### 非 MSVC 编译器（MinGW / g++，可选）
@@ -148,7 +149,7 @@ void  ConcurrentFree(void* ptr);      // 释放内存
 核心逻辑与编译器无关，但源码里有几处 MSVC 特有写法，用 g++ / clang 编译需要小改：
 
 ```bash
-g++ -std=c++17 -O2 -fpermissive -w src/Benchmark.cpp src/ThreadCache.cpp \
+g++ -std=c++17 -O2 src/Benchmark.cpp src/ThreadCache.cpp \
     src/CentralCache.cpp src/PageCache.cpp -o tcmalloc1.exe
 ```
 
@@ -172,16 +173,17 @@ g++ -std=c++17 -O2 -fpermissive -w src/Benchmark.cpp src/ThreadCache.cpp \
 
 ## 性能参考
 
-工程默认入口 `src/Benchmark.cpp` 会对比 4 个线程、10 轮、每轮 10 万次 `malloc/free` 与 `ConcurrentAlloc/ConcurrentFree` 的耗时。本机一次运行结果（MinGW-w64 8.1.0，`-O2`，仅供参考，与机器和编译器相关）：
+工程默认入口 `src/Benchmark.cpp` 会对比 4 个线程、10 轮、每轮 10 万次 `malloc/free` 与 `ConcurrentAlloc/ConcurrentFree` 的耗时（共计 400 万次申请 + 400 万次释放）。本机 VS 2022 `Release|x64` 跑 3 轮的合计耗时（波动较大，仅供参考）：
 
-| 实现 | alloc 耗时 | dealloc 耗时 | 合计 |
-| --- | --- | --- | --- |
-| `ConcurrentAlloc / Free` | 157 ms | 169 ms | **326 ms** |
-| `malloc / free` | 228 ms | 201 ms | 429 ms |
+| 实现 | 3 轮合计耗时 | 平均 |
+| --- | --- | --- |
+| `ConcurrentAlloc / Free` | 209 / 259 / 294 ms | **254 ms** |
+| `malloc / free` | 420 / 467 / 494 ms | 460 ms |
+
+`Debug` 配置下两者都慢一个数量级（实测内存池约 1.5 s、`malloc` 约 7.6 s），内存池的领先幅度更明显。
 
 ## 已知限制
 
-- **x64 配置编译能过、但运行会崩**：现代 Windows 的 `VirtualAlloc` 会返回 4GB 以上的地址（本机实测在 3TB 量级，页号约 3.8 亿），而页号到 span 的映射表 `TCMalloc_PageMap1<32 - PAGE_SHIFT>` 只覆盖 2^19 = 524288 个页（即 4GB 地址空间），且 `set()` 没有边界检查，于是越界写内存直接崩溃（`0xC0000005`）。解决办法二选一：使用 `x86` 平台（32 位进程地址空间本来就小于 4GB），或把映射表换成三级基数树 `TCMalloc_PageMap3` / `std::unordered_map`。
 - 仅支持 Windows：`SystemAlloc/SystemFree` 依赖 `VirtualAlloc/VirtualFree`。
 - 暂未实现 tcmalloc 的后台回收线程（scavenger），空闲页不会被主动归还系统。
 - 未提供 `aligned_alloc`、`realloc` 等接口，仅支持固定大小的小对象与整页大对象。

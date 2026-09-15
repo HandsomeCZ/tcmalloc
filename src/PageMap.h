@@ -91,7 +91,7 @@ public:
     {
         const Number i1 = k >> LEAF_BITS;
         const Number i2 = k & (LEAF_LENGTH - 1);
-        ASSERT(i1 < ROOT_LENGTH);
+        assert(i1 < ROOT_LENGTH);
         root_[i1]->values[i2] = v;
     }
 
@@ -192,7 +192,12 @@ public:
 
     void set(Number k, void *v)
     {
-        ASSERT(k >> BITS == 0);
+        assert(k >> BITS == 0);
+
+        // 中间节点和叶子都是按需分配的，写入前先保证这条路径上的节点都已存在
+        // （PageMap2 是构造时一次性全量预分配，所以它的 set 不需要这一步）
+        Ensure(k, 1);
+
         const Number i1 = k >> (LEAF_BITS + INTERIOR_BITS);
         const Number i2 = (k >> LEAF_BITS) & (INTERIOR_LENGTH - 1);
         const Number i3 = k & (LEAF_LENGTH - 1);
